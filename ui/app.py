@@ -9,6 +9,7 @@ Run with: streamlit run ui/app.py
 """
 
 import streamlit as st
+import os
 import logging
 from datetime import datetime
 from typing import Optional
@@ -259,24 +260,69 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
+    # Whole-app help — one place that explains what this is and how it works
+    with st.expander("❓ What is this? How does it work?", expanded=False):
+        st.markdown("""
+**In one sentence:** you ask a question, the app reads your emotional/mental state
+from *how you write*, plots that state on a 3D "consciousness field", and then asks
+an AI to answer you *in light of that state* — so the response is shaped by where
+your awareness is, not just what you asked.
+
+**The idea behind it (no mysticism, just a useful lens):** the way we phrase a
+question carries real information — anxious questions sound urgent, curious ones
+sound open, heavy ones sound deep. The app captures that signal and uses it to
+make the AI's answer feel more attuned to you.
+
+**What happens when you press Send (the pipeline):**
+1. **Read your state** — your question text is scanned for
+   emotional tone, question-framing, urgency, and contemplative words. That produces
+   three numbers: **Arousal** (calm ↔ activated), **Depth** (surface ↔ deep), and
+   **Openness** (guarded ↔ receptive).
+2. **Plot it on the field** — those three numbers place a glowing point on a
+   3D map. The map is divided into named archetypal "regions" (e.g. *Open
+   Receptivity*, *Anxiety Spiral*). The app tells you which region you're nearest.
+3. **Ask the AI** — your question *plus* your state readout is sent to the
+   backend you picked (your **local Ollama** model, or **cloud OpenRouter**).
+4. **Show resonance** — bars show which regions your state most resembles.
+5. **Remember it** — every session is saved to a local database (Session History)
+   so you can spot patterns over time (Pattern Analysis).
+
+**What it's NOT:** it cannot read your mind, predict the future, or channel
+anything. It's a structured, honest way to reflect — it takes how you ask, and
+mirrors it back to you through the field. It's a tool for self-reflection, not magic.
+
+**Quick start:** leave the backend on **ollama**, keep the default host/model,
+type a question in the box, press **Send 🔮**. That's it.
+        """, unsafe_allow_html=True)
+
     # Sidebar configuration
     with st.sidebar:
         st.header("Configuration")
+        st.caption("Hover any control to learn what it does.")
 
         # Backend selection
         backend = st.selectbox(
             "AI Backend",
             ["ollama", "openrouter"],
             index=0 if config.backend == "ollama" else 1,
-            help="Choose between local Ollama or cloud OpenRouter",
+            help=("Which engine powers the field's responses. "
+                  "'ollama' runs a local model on your own machine (free, private, "
+                  "works fully offline). 'openrouter' sends your question to a "
+                  "cloud model through OpenRouter (needs an API key, costs per use). "
+                  "Switch any time — changes take effect immediately."),
         )
 
         # Ollama settings (shown when Ollama is selected)
         if backend == "ollama":
+            st.caption("Ollama is a local AI model server. These settings point "
+                       "the app at the running Ollama container on your machine.")
             ollama_host = st.text_input(
                 "Ollama Host",
                 value=config.ollama_host,
-                help="Hostname or IP of your Ollama server",
+                help=("Hostname or IP address where Ollama is running. "
+                      "On this setup it is 'ollama' (the container name). "
+                      "Use 'localhost' or '127.0.0.1' if Ollama runs directly "
+                      "on this machine."),
             )
             ollama_port = int(st.number_input(
                 "Ollama Port",
@@ -284,14 +330,55 @@ def main():
                 min_value=1024.0,
                 max_value=65535.0,
                 step=1.0,
-                help="Port where Ollama is listening",
+                help=("The network port Ollama listens on. The default is 11434. "
+                      "Leave this as-is unless you changed Ollama's port."),
             ))
             ollama_model = st.text_input(
                 "Ollama Model",
                 value=config.ollama_model,
-                help="Model name from your Ollama container",
+                help=("The name of the model to use inside your Ollama container, "
+                      "for example 'ornith:9b'. You can see available models by "
+                      "running 'ollama list' in the container."),
             )
+            # Keep openrouter values from config (not shown)
+            openrouter_api_key = config.openrouter_api_key
+            openrouter_model = config.openrouter_model
         else:
+            # OpenRouter settings (shown when OpenRouter is selected)
+            st.caption("OpenRouter is a cloud AI gateway. The field sends your "
+                       "question to a cloud model; a small per-use cost applies.")
+            openrouter_api_key = st.text_input(
+                "OpenRouter API Key",
+                value=config.openrouter_api_key,
+                type="password",
+                help=("Your secret OpenRouter key (sk-or-v1-...). Get one free at "
+                      "openrouter.ai/keys. This is stored in your .env file and "
+                      "only ever sent to OpenRouter — never shared. You can also "
+                      "set it as the OPENROUTER_API_KEY environment variable."),
+            )
+            openrouter_model = st.text_input(
+                "OpenRouter Model",
+                value=config.openrouter_model,
+                help=("Which cloud model to use, e.g. 'inclusionai/ling-3.0-flash:free'. "
+                      "Pick a free/:free model to avoid charges, or any model ID "
+                      "listed at openrouter.ai/models."),
+            )
+            if st.button(
+                "💾 Save key to .env",
+                help=("Reveals a field to securely save the OpenRouter API key to "
+                      "your .env file (permissions 0600, owner-only) so you don't "
+                      "have to re-enter it every session. Your .env is git-ignored "
+                      "and never committed or shared. If a key is already stored, "
+                      "it is overwritten."),
+            ):
+                if not openrouter_api_key.strip():
+                    st.warning("Enter an API key before saving.")
+                else:
+                    saved = config.save_secret("OPENROUTER_API_KEY", openrouter_api_key.strip())
+                    os.chmod(saved, 0o600)
+                    st.success(f"Saved to {saved.name} (owner-only permissions). "
+                               "It will load automatically next time.")
+            # Keep ollama values from config (not shown)
             ollama_host = config.ollama_host
             ollama_port = config.ollama_port
             ollama_model = config.ollama_model
@@ -299,24 +386,47 @@ def main():
         # Advanced settings
         st.markdown("---")
         st.subheader("Field Settings")
-        field_x = st.slider("Arousal Range", 5.0, 20.0, float(config.field_x_range), 1.0)
-        field_y = st.slider("Depth Range", 5.0, 20.0, float(config.field_y_range), 1.0)
-        field_z = st.slider("Openness Range", 5.0, 20.0, float(config.field_z_range), 1.0)
+        st.caption("These controls shape the size of the 3D consciousness field "
+                   "space that your state is plotted inside.")
+        field_x = st.slider(
+            "Arousal Range",
+            5.0, 20.0, float(config.field_x_range), 1.0,
+            help=("Width of the field along the Arousal axis — how far calm vs "
+                  "activated states can travel. Larger = more room for extreme "
+                  "moods. Axis note: +/-X on the map."),
+        )
+        field_y = st.slider(
+            "Depth Range",
+            5.0, 20.0, float(config.field_y_range), 1.0,
+            help=("Height of the field along the Depth axis — how deep (unconscious) "
+                  "vs surface (everyday) your reading can go. Larger = more depth "
+                  "resolution. Axis note: +/-Y on the map."),
+        )
+        field_z = st.slider(
+            "Openness Range",
+            5.0, 20.0, float(config.field_z_range), 1.0,
+            help=("Width of the field along the Openness axis — how closed/defensive "
+                  "vs receptive/open your states can register.")
+        )
 
         # Session info
         st.markdown("---")
-        st.caption("Looking Glass Engine v0.1.0")
-        st.caption("Everything runs locally — no data leaves your machine")
+        st.caption(f"Looking Glass Engine v{config.version}")
+        st.caption("Everything runs locally — no data leaves your machine"
+                   if backend == "ollama"
+                   else "Using cloud OpenRouter backend — queries are sent to OpenRouter")
 
     # Initialize engine (cache keyed on all config values so switching
     # backend/model/field-range in the sidebar rebuilds the engine)
     @st.cache_resource
-    def init_engine(backend_name, host, port, model, fx, fy, fz):
+    def init_engine(backend_name, host, port, model, or_key, or_model, fx, fy, fz):
         # Override config from sidebar
         config.backend = backend_name
         config.ollama_host = host
         config.ollama_port = port
         config.ollama_model = model
+        config.openrouter_api_key = or_key
+        config.openrouter_model = or_model
         config.field_x_range = fx
         config.field_y_range = fy
         config.field_z_range = fz
@@ -328,6 +438,7 @@ def main():
     try:
         engine, renderer = init_engine(
             backend, ollama_host, ollama_port, ollama_model,
+            openrouter_api_key, openrouter_model,
             field_x, field_y, field_z,
         )
     except Exception as e:
@@ -348,7 +459,15 @@ def main():
 
         col_send, col_clear = st.columns([1, 4])
         with col_send:
-            send_clicked = st.button("Send 🔮", use_container_width=True, type="primary")
+            send_clicked = st.button(
+                "Send 🔮",
+                use_container_width=True,
+                type="primary",
+                help=("Sends your question through the Looking Glass pipeline: "
+                      "your text is analyzed for consciousness state, plotted on "
+                      "the 3D field, and sent to the chosen backend (Ollama or "
+                      "OpenRouter) to produce a field response."),
+            )
         with col_clear:
             st.write("")  # spacer
 
@@ -383,31 +502,68 @@ def main():
             st.markdown(field_html, unsafe_allow_html=True)
 
             st.markdown("### State Reading")
+            st.caption("How the app read your consciousness from the way you wrote.")
             col_a, col_d, col_o = st.columns(3)
             with col_a:
-                st.metric("Arousal", f"{state.arousal:+.2f}",
-                         delta_color="inverse" if state.arousal < 0 else "normal")
+                st.metric(
+                    "Arousal", f"{state.arousal:+.2f}",
+                    delta_color="inverse" if state.arousal < 0 else "normal",
+                    help=("Arousal (X axis, -10 to +10): how calm vs activated your "
+                          "state reads. Negative = calm/reflective, positive = "
+                          "activated/energized. Derived from emotional tone, urgency "
+                          "words, and typing pace in your question."),
+                )
             with col_d:
-                st.metric("Depth", f"{state.depth:+.2f}",
-                         delta_color="normal" if state.depth > 0 else "inverse")
+                st.metric(
+                    "Depth", f"{state.depth:+.2f}",
+                    delta_color="normal" if state.depth > 0 else "inverse",
+                    help=("Depth (Y axis, -10 to +10): how surface vs deep your "
+                          "state reads. Positive = deep/contemplative, negative = "
+                          "everyday/surface. Derived from abstract and contemplative "
+                          "word use in your question."),
+                )
             with col_o:
-                st.metric("Openness", f"{state.openness:+.2f}",
-                         delta_color="normal" if state.openness > 0 else "inverse")
+                st.metric(
+                    "Openness", f"{state.openness:+.2f}",
+                    delta_color="normal" if state.openness > 0 else "inverse",
+                    help=("Openness (Z axis, -10 to +10): how closed/defensive vs "
+                          "receptive/open your state reads. Positive = open, "
+                          "negative = guarded. Derived from question framing "
+                          "(open-ended vs closed) in your question."),
+                )
 
             # Region badge
             css_class = get_region_css_class(region)
-            st.markdown(f'<span class="region-badge {css_class}">{region}</span>',
-                       unsafe_allow_html=True)
+            st.markdown(
+                f'<span class="region-badge {css_class}" title="The nearest named '
+                f'region on the consciousness field to your current state reading. '
+                f'This is the archetype your awareness is closest to right now.">'
+                f'{region}</span>',
+                unsafe_allow_html=True,
+            )
 
             # Magnitude and confidence
-            st.caption(f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}")
+            st.caption(
+                f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}",
+                help=("Magnitude = overall strength of your state reading (how far "
+                      "your state sits from the field's neutral center). Confidence = "
+                      "how much text was available to base the reading on (0 to 1); "
+                      "longer questions give more confident readings."),
+            )
 
             # Resonance bars
             st.markdown("### Field Resonance")
+            st.caption("How strongly your current state resonates with each "
+                       "archetypal region — higher score = closer match.")
             resonance = result.get("resonance", {})
             if resonance:
                 for name, score in sorted(resonance.items(), key=lambda x: x[1], reverse=True)[:5]:
-                    st.markdown(f"**{name}**")
+                    st.markdown(
+                        f'<span title="Resonance of your current state with the '
+                        f'{name} archetype, from 0 (no match) to 1 (perfect match).">'
+                        f'**{name}**</span>',
+                        unsafe_allow_html=True,
+                    )
                     st.progress(min(score, 1.0))
                     st.caption(f"Score: {score:.3f}")
 
@@ -428,15 +584,28 @@ def main():
         # Show region and response
         col_resp, col_meta = st.columns([3, 1])
         with col_resp:
+            st.caption("The AI's reflection, generated from your question plus "
+                       "your analyzed consciousness state — not a generic answer.")
             st.markdown(f'<div class="response-box">{response}</div>', unsafe_allow_html=True)
         with col_meta:
-            st.markdown(f'<span class="region-badge {css_class}">{region}</span>',
-                       unsafe_allow_html=True)
-            st.caption(f"Backend: {config.backend}")
-            st.caption(f"Model: {config.ollama_model if config.backend == 'ollama' else config.openrouter_model}")
+            st.markdown(
+                f'<span class="region-badge {css_class}" title="The archetypal '
+                f'field region your state is closest to. Backend and model below '
+                f'tell you which engine produced this response.">{region}</span>',
+                unsafe_allow_html=True,
+            )
+            st.caption(f"Backend: {config.backend}",
+                       help="Which engine produced the response — 'ollama' is your "
+                            "local model, 'openrouter' is the cloud gateway.")
+            st.caption(
+                f"Model: {config.ollama_model if config.backend == 'ollama' else config.openrouter_model}",
+                help="The specific model name behind this response.",)
 
     # Session history in expander
     with st.expander("📊 Session History"):
+        st.caption("Every question you've asked, with the state reading and "
+                   "region at the time. Grows over time so you can see how your "
+                   "consciousness shifts across sessions.")
         history = engine.get_history(10)
         if history:
             for s in history:

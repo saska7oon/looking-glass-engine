@@ -63,6 +63,9 @@ class Config:
     openrouter_model: str = get("OPENROUTER_MODEL", "inclusionai/ling-3.0-flash:free")
     openrouter_base_url: str = get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+    # App version
+    version: str = "0.1.0"
+
     # Ollama settings
     ollama_host: str = get("OLLAMA_HOST", "localhost")
     ollama_port: int = get_int("OLLAMA_PORT", 11434)
@@ -94,6 +97,26 @@ class Config:
     def db_path_expanded(self) -> str:
         """Return the database path with home directory expanded."""
         return os.path.expanduser(self.db_path)
+
+    def save_secret(self, key: str, value: str) -> Path:
+        """Persist a secret (e.g. API key) to the .env file securely.
+
+        Creates/writes the project .env with owner-only permissions (0600)
+        so the key is not world-readable. Ignores any pre-existing value for
+        the same variable so secrets are never overwritten in place.
+        """
+        env_path = Path(__file__).parent.parent / ".env"
+        lines = []
+        if env_path.exists():
+            lines = env_path.read_text().splitlines()
+
+        # Remove any existing line for this variable, then append cleanly.
+        out = [ln for ln in lines if not ln.startswith(f"{key}=")]
+        out.append(f"{key}={value}")
+        env_path.write_text("\n".join(out) + "\n")
+        # Owner-only read/write: never group/world-readable.
+        os.chmod(env_path, 0o600)
+        return env_path
 
 
 config = Config()
