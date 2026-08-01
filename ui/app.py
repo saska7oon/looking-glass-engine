@@ -669,14 +669,14 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
 
             # Magnitude and confidence
             confirmed_tag = " (confirmed by you)" if result.get("confirmed") else ""
+            method_tag = "valid offline reading" if result.get("reading_method") != "keyword" else "keyword fallback"
             st.caption(
                 f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}"
                 f"{confirmed_tag}",
-                help=("Magnitude = overall strength of your state reading (how far "
-                      "your state sits from the field's neutral center). Confidence = "
-                      "how much text was available to base the reading on (0 to 1). "
-                      "'Confirmed by you' means you corrected this reading, so it "
-                      "anchors the response."),
+                help=f"Magnitude = overall strength of your state reading. "
+                     f"Confidence = how much text was available (0 to 1). "
+                     f"Reading engine: {method_tag}. 'Confirmed by you' means you "
+                     f"corrected this reading, so it anchors the response.",
             )
 
             # Resonance bars

@@ -23,6 +23,10 @@ dev = [
 ollama = [
     "ollama>=0.3",
 ]
+reading = [
+    "vaderSentiment>=3.3",
+    "empath>=0.8",
+]
 
 [build-system]
 requires = ["hatchling"]

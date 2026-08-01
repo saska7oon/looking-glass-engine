@@ -11,6 +11,7 @@ from looking_glass.aether import AetherOracle, AetherCast
 from looking_glass.backend import get_backend, BackendError
 from looking_glass.config import config
 from looking_glass.field import ConsciousnessField
+from looking_glass.readings import ValidStateReader
 from looking_glass.state import StateCapture, StateVector
 from looking_glass.tracker import SynchronicityTracker
 
@@ -34,6 +35,7 @@ class LookingGlassEngine:
         self.tracker = SynchronicityTracker()
         self.backend = get_backend()
         self.current_user: str = "default"
+        self.reader = ValidStateReader()
         # Cast the aether personality once per engine lifetime. The engine is
         # cached per session in the UI, so this is thread-constant: the oracle
         # stays the same across a session's multi-turn follow-ups, then
@@ -74,10 +76,24 @@ class LookingGlassEngine:
                 session_nonce=session_nonce,
             )
 
-        # 2. Capture the user's state (confirmed state anchors the reading).
-        state = self.state_capture.capture(
-            question, typing_speed_wps, pause_duration
+        # 2. Capture the user's state using the valid reading (or confirmed).
+        # Map valid 0..1 readings onto the -10..10 field axes.
+        reading = self.reader.read(question)
+        state = StateVector(
+            arousal=round((reading.arousal_est - 0.5) * 20.0, 2),
+            depth=round((reading.depth_est - 0.5) * 20.0, 2),
+            openness=round((reading.disclosure_est - 0.5) * 20.0, 2),
+            raw_text=question,
+            confidence=reading.confidence,
         )
+        # Sign-align arousal with valence: negative valence + high arousal reads
+        # as distress (negative), positive valence reads as activation (positive).
+        if reading.valence < -0.1:
+            state.arousal = -abs(state.arousal)
+        elif reading.valence > 0.1:
+            state.arousal = abs(state.arousal)
+        self.state_capture._history.append(state)
+
         if confirmed_state:
             # User-confirmed state wins on any axis the user set.
             for k in ("arousal", "depth", "openness"):
@@ -99,8 +115,9 @@ class LookingGlassEngine:
             "depth": state.depth,
             "openness": state.openness,
             "magnitude": state.magnitude(),
-            "confidence": state.confidence,
+            "confidence": reading.confidence,
             "confirmed": bool(confirmed_state),
+            "reading_method": reading.method,
             "persona_name": self.persona.archetype_name,
             "persona_voice": self.persona.voice_instruction,
         }
@@ -147,6 +164,7 @@ class LookingGlassEngine:
             "session_id": session_id,
             "persona": self.persona,
             "confirmed": bool(confirmed_state),
+            "reading_method": reading.method,
         }
 
     def get_pattern(self) -> Optional[StateVector]:
