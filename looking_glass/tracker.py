@@ -23,7 +23,7 @@ class SynchronicityTracker:
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or config.db_path_expanded
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 

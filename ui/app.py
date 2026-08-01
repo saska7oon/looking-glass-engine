@@ -266,13 +266,14 @@ def main():
                 value=config.ollama_host,
                 help="Hostname or IP of your Ollama server",
             )
-            ollama_port = st.number_input(
+            ollama_port = int(st.number_input(
                 "Ollama Port",
-                value=config.ollama_port,
-                min=1024,
-                max=65535,
+                value=float(config.ollama_port),
+                min_value=1024.0,
+                max_value=65535.0,
+                step=1.0,
                 help="Port where Ollama is listening",
-            )
+            ))
             ollama_model = st.text_input(
                 "Ollama Model",
                 value=config.ollama_model,
@@ -286,9 +287,9 @@ def main():
         # Advanced settings
         st.markdown("---")
         st.subheader("Field Settings")
-        field_x = st.slider("Arousal Range", 5, 20, config.field_x_range, 1)
-        field_y = st.slider("Depth Range", 5, 20, config.field_y_range, 1)
-        field_z = st.slider("Openness Range", 5, 20, config.field_z_range, 1)
+        field_x = st.slider("Arousal Range", 5.0, 20.0, float(config.field_x_range), 1.0)
+        field_y = st.slider("Depth Range", 5.0, 20.0, float(config.field_y_range), 1.0)
+        field_z = st.slider("Openness Range", 5.0, 20.0, float(config.field_z_range), 1.0)
 
         # Session info
         st.markdown("---")
