@@ -36,6 +36,9 @@ class LookingGlassEngine:
         self.backend = get_backend()
         self.current_user: str = "default"
         self.reader = ValidStateReader()
+        # Thread continuity: the oracle remembers THIS session's conversation.
+        self.conversation: list[dict] = []
+        self.mode: str = "General"
         # Cast the aether personality once per engine lifetime. The engine is
         # cached per session in the UI, so this is thread-constant: the oracle
         # stays the same across a session's multi-turn follow-ups, then
@@ -49,6 +52,7 @@ class LookingGlassEngine:
         pause_duration: float = 0.0,
         confirmed_state: Optional[dict] = None,
         history: Optional[list] = None,
+        mode: Optional[str] = None,
     ) -> dict:
         """Process a question through the consciousness field.
 
@@ -58,11 +62,14 @@ class LookingGlassEngine:
             pause_duration: Seconds since last input.
             confirmed_state: User-corrected state (overrides/anchors the read).
             history: Recent past sessions to feed the oracle's memory.
+            mode: Goal-matched session intent (General/Process/Lift/Clarify/...).
 
         Returns:
             dict with keys: response, state, field_point, region, resonance,
             persona, confirmed.
         """
+        if mode:
+            self.mode = mode
         # 1. Cast the aether personality (once per session/thread).
         session_nonce = f"{config.backend}-{id(self):x}"
         state_dict = {}
@@ -118,6 +125,8 @@ class LookingGlassEngine:
             "confidence": reading.confidence,
             "confirmed": bool(confirmed_state),
             "reading_method": reading.method,
+            "mode": self.mode,
+            "conversation": self.conversation,
             "persona_name": self.persona.archetype_name,
             "persona_voice": self.persona.voice_instruction,
         }
@@ -129,6 +138,10 @@ class LookingGlassEngine:
         except BackendError as e:
             logger.error(f"Backend error: {e}")
             response = f"[Backend error: {e}. Check your configuration.]"
+
+        # 7a. Track the thread (multi-turn continuity) for this session.
+        self.conversation.append({"role": "user", "content": question})
+        self.conversation.append({"role": "assistant", "content": response})
 
         # 7. Log the session.
         session_id = self.tracker.log_session(
@@ -205,6 +218,18 @@ class LookingGlassEngine:
     def get_pattern_regions(self) -> list[dict]:
         """Return frequently visited field regions for the current user."""
         return self.tracker.get_pattern_regions(user=self.current_user)
+
+    def get_recurring_themes(self) -> list[dict]:
+        """Return recurring words/themes across the user's questions."""
+        return self.tracker.get_recurring_themes(user=self.current_user)
+
+    def get_state_delta(self) -> dict:
+        """Return how the user's state has changed over time (first vs latest)."""
+        return self.tracker.get_state_delta(user=self.current_user)
+
+    def reset_thread(self):
+        """Start a fresh thread (clear this session's conversation context)."""
+        self.conversation = []
 
     def shutdown(self):
         """Clean up resources."""

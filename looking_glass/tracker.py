@@ -297,6 +297,68 @@ class SynchronicityTracker:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_recurring_themes(self, user: str = "default", limit: int = 8) -> list[dict]:
+        """Aggregate recurring words/themes across a user's questions."""
+        import re
+        from collections import Counter
+
+        rows = self._conn.execute(
+            "SELECT question FROM sessions WHERE user = ? AND question IS NOT NULL",
+            (user,),
+        ).fetchall()
+
+        # A small function-word stoplist to surface meaningful themes.
+        STOP = {
+            "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at",
+            "for", "with", "about", "is", "am", "are", "was", "were", "be", "been",
+            "being", "i", "me", "my", "myself", "we", "our", "us", "you", "your",
+            "it", "its", "this", "that", "these", "those", "what", "why", "how",
+            "when", "where", "who", "which", "do", "does", "did", "have", "has",
+            "had", "can", "could", "will", "would", "should", "might", "may",
+            "not", "no", "so", "if", "then", "than", "as", "just", "really",
+            "feel", "feels", "feeling", "want", "wants", "need", "needs", "get",
+            "keep", "make", "take", "tell", "ask", "life", "day", "days", "time",
+        }
+        counter = Counter()
+        for row in rows:
+            q = (row["question"] or "").lower()
+            for w in re.findall(r"\b[a-z]{3,}\b", q):
+                if w not in STOP:
+                    counter[w] += 1
+        total = counter.total() or 1
+        out = []
+        for word, count in counter.most_common(limit):
+            if count < 2:
+                break
+            out.append({"word": word, "count": count, "share": round(count / total, 3)})
+        return out
+
+    def get_state_delta(self, user: str = "default") -> dict:
+        """Compare earliest vs most recent sessions to surface change over time."""
+        rows = self._conn.execute(
+            """
+            SELECT id, state_arousal, state_depth, state_openness, timestamp
+            FROM sessions
+            WHERE user = ?
+            ORDER BY id ASC
+            """,
+            (user,),
+        ).fetchall()
+        if len(rows) < 2:
+            return {"has_delta": False}
+        first = rows[0]
+        last = rows[-1]
+        def d(key): return round(float(last[key]) - float(first[key]), 1)
+        return {
+            "has_delta": True,
+            "sessions": len(rows),
+            "from": first["timestamp"][:10],
+            "to": last["timestamp"][:10],
+            "arousal_delta": d("state_arousal"),
+            "depth_delta": d("state_depth"),
+            "openness_delta": d("state_openness"),
+        }
+
     def get_synchronicities(self, limit: int = 10) -> list[dict]:
         """Return recent synchronicity events."""
         cursor = self._conn.execute(

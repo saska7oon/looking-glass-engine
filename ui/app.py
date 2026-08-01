@@ -589,7 +589,24 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
         with col_clear:
             st.write("")  # spacer
 
-        # Single query mode
+        # Session intent mode + thread control
+        mode = st.selectbox(
+            "Session intent",
+            ["General", "Process", "Lift", "Clarify", "Find Direction", "Calm"],
+            index=["General", "Process", "Lift", "Clarify", "Find Direction", "Calm"].index(engine.mode)
+            if engine.mode in ["General", "Process", "Lift", "Clarify", "Find Direction", "Calm"] else 0,
+            help=("What you want this session to do for you. The oracle shapes "
+                  "its focus and its takeaway around your intent. General is "
+                  "open; Process works through a feeling; Lift savors the good; "
+                  "Clarify untangles a decision; Find Direction draws out "
+                  "values; Calm grounds and stills."),
+        )
+        if st.button("🔄 New thread",
+                     help="Forget this session's conversation and start fresh. "
+                          "The oracle keeps its voice but drops the thread "
+                          "continuity so you can begin a new subject."):
+            engine.reset_thread()
+
         if send_clicked and question.strip():
             with st.spinner("The field is listening..."):
                 try:
@@ -597,6 +614,7 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
                     result = engine.query(
                         question.strip(),
                         confirmed_state=confirmed_state,
+                        mode=mode,
                         history=history,
                     )
 
@@ -740,6 +758,21 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
                 f"Model: {config.ollama_model if config.backend == 'ollama' else config.openrouter_model}",
                 help="The specific model name behind this response.",)
 
+    # Current thread (multi-turn continuity) — shown when the thread has turns
+    if engine.conversation:
+        with st.expander("🧵 This Thread"):
+            st.caption("Your ongoing conversation with the oracle in this "
+                       "session's voice. Keep asking follow-ups — the oracle "
+                       "remembers what came before.")
+            for i in range(0, len(engine.conversation), 2):
+                if i < len(engine.conversation):
+                    q = engine.conversation[i].get("content", "")
+                    st.markdown(f"**You:** {q}")
+                if i + 1 < len(engine.conversation):
+                    a = engine.conversation[i + 1].get("content", "")
+                    st.markdown(f"*Oracle:* {a[:400]}{'…' if len(a) > 400 else ''}")
+                    st.markdown("---")
+
     # Session history in expander (scoped to current user)
     with st.expander("📊 Session History"):
         st.caption(f"Every question {engine.current_user} has asked, with the "
@@ -761,16 +794,47 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
 
     # Pattern analysis (scoped to current user)
     with st.expander("🔍 Pattern Analysis"):
-        st.caption(f"Regions {engine.current_user} visits most often, drawn from "
-                   "every logged session. This is the oracle's long memory — the "
-                   "patterns it can name back to you over time.")
+        st.caption(f"The oracle's long memory of {engine.current_user}: regions "
+                   "visited most, recurring themes, and how the state has "
+                   "shifted over time.")
+
+        delta = engine.get_state_delta()
+        if delta.get("has_delta"):
+            st.markdown("**📈 Change over time**")
+            st.caption(f"Across {delta['sessions']} sessions ({delta['from']} → {delta['to']}):")
+            st.caption(f"• Arousal: {delta['arousal_delta']:+.1f}  "
+                       f"• Depth: {delta['depth_delta']:+.1f}  "
+                       f"• Self-disc: {delta['openness_delta']:+.1f}")
+
         regions = engine.get_pattern_regions()
         if regions:
-            st.write("Frequently visited regions:")
+            st.markdown("**🌍 Regions visited most**")
             for r in regions:
                 st.markdown(f"- **{r.get('label', 'Unknown')}**: {r.get('visits', 0)} visits")
-        else:
+
+        themes = engine.get_recurring_themes()
+        if themes:
+            st.markdown("**🔁 Recurring themes in your words**")
+            st.markdown(" — ".join(f"{t['word']}" for t in themes))
+
+        if not regions and not themes and not delta.get("has_delta"):
             st.info("No pattern data yet. Keep asking questions to build your pattern.")
+
+    # Distress / help note (honest limits)
+    with st.expander("🛟 Not therapy — and where to get real help"):
+        st.markdown(
+            "The Looking Glass is a **reflection companion**, not a clinician. "
+            "It never diagnoses or treats mental-health conditions, and it can "
+            "misread you — that's why you can correct its state reading.\n\n"
+            "If you're in crisis, feeling unsafe, or need real, human support, "
+            "please reach out now:\n"
+            "- **In Canada (all ages):** call or text **988** — suicide & crisis support, 24/7\n"
+            "- **Calgary & Southern AB Distress Centre:** 24/7 phone, text & live chat\n"
+            "  (search 'Distress Centre Calgary' online)\n"
+            "- **Kids Help Phone (under 25):** available 24/7 across Canada\n"
+            "- **If you are in immediate danger, call 911 (or your local emergency number).**",
+            unsafe_allow_html=True,
+        )
 
     # Footer
     st.markdown("---")
