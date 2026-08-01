@@ -121,6 +121,28 @@ st.markdown("""
         font-size: 0.85rem;
         font-style: italic;
     }
+    .aether-cast {
+        background: linear-gradient(135deg, #1a1a3a, #2c1a3a);
+        color: #d9c8ff;
+        border: 1px solid #4a3a7a;
+        border-radius: 8px;
+        padding: 0.5rem 0.9rem;
+        margin: 0.5rem 0 1rem 0;
+        font-size: 0.95rem;
+    }
+    .aether-reveal {
+        margin-left: 0.5rem;
+        cursor: help;
+        opacity: 0.7;
+    }
+    .takeaway-box {
+        background: #f4f0ff;
+        border-left: 4px solid #8e44ad;
+        border-radius: 8px;
+        padding: 0.8rem 1.1rem;
+        margin: 0.5rem 0;
+        color: #4a3760;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,6 +159,18 @@ def get_region_css_class(region_name: str) -> str:
         "Transcendent Peak": "region-transcendent",
     }
     return mapping.get(region_name, "region-unmapped")
+
+
+def _list_users() -> list[str]:
+    """Lightweight list of user accounts (used before the engine is built)."""
+    try:
+        from looking_glass.tracker import SynchronicityTracker
+        t = SynchronicityTracker()
+        users = t.get_users()
+        t.close()
+        return users
+    except Exception:
+        return []
 
 
 def render_field_map_html(field, state: Optional[dict] = None, response: str = "", region: str = "") -> str:
@@ -274,25 +308,35 @@ sound open, heavy ones sound deep. The app captures that signal and uses it to
 make the AI's answer feel more attuned to you.
 
 **What happens when you press Send (the pipeline):**
-1. **Read your state** — your question text is scanned for
+1. **The oracle is cast** — each session, a personality/voice is drawn from the
+   aether by genuine chance (a seed from time + your state as a bias). It stays
+   constant for the whole session, then re-casts next time. You can reveal how
+   it was chosen.
+2. **Read your state** — your question text is scanned for
    emotional tone, question-framing, urgency, and contemplative words. That produces
-   three numbers: **Arousal** (calm ↔ activated), **Depth** (surface ↔ deep), and
-   **Openness** (guarded ↔ receptive).
-2. **Plot it on the field** — those three numbers place a glowing point on a
-   3D map. The map is divided into named archetypal "regions" (e.g. *Open
-   Receptivity*, *Anxiety Spiral*). The app tells you which region you're nearest.
-3. **Ask the AI** — your question *plus* your state readout is sent to the
-   backend you picked (your **local Ollama** model, or **cloud OpenRouter**).
-4. **Show resonance** — bars show which regions your state most resembles.
-5. **Remember it** — every session is saved to a local database (Session History)
-   so you can spot patterns over time (Pattern Analysis).
+   three honest *tendencies* (low-moderate confidence): **Arousal** (calm ↔
+   activated), **Depth** (surface ↔ deep), and **Self-disclosure** (guarded ↔
+   receptive). You can correct any of them.
+3. **Plot it on the field** — those three numbers place a glowing point on a
+   3D map with named archetypal "regions" (e.g. *Open Receptivity*, *Anxiety
+   Spiral*). The app tells you which region you're nearest.
+4. **Ask the oracle** — your question *plus* your state readout is sent, in
+   this session's voice, to the backend you picked (your **local Ollama** model,
+   or **cloud OpenRouter**).
+5. **Show resonance** — bars show which regions your state most resembles.
+6. **Door to carry** — every reply ends in a takeaway: a reframe, a micro-step,
+   a question to hold, or a split of what can change vs. what to accept.
+7. **Remember it** — every session is saved to a local database, scoped to
+   **your name** (Session History), so the oracle can name patterns back to you
+   over time (Pattern Analysis). Different users get separate histories.
 
 **What it's NOT:** it cannot read your mind, predict the future, or channel
-anything. It's a structured, honest way to reflect — it takes how you ask, and
-mirrors it back to you through the field. It's a tool for self-reflection, not magic.
+anything. The oracle voice is a lot-cast persona — you can always reveal how it
+was generated. It's a structured, honest tool for self-reflection, not magic or
+therapy.
 
-**Quick start:** leave the backend on **ollama**, keep the default host/model,
-type a question in the box, press **Send 🔮**. That's it.
+**Quick start:** pick your name, leave the backend on **ollama**, keep the
+default host/model, type a question in the box, press **Send 🔮**. That's it.
         """, unsafe_allow_html=True)
 
     # Sidebar configuration
@@ -409,53 +453,127 @@ type a question in the box, press **Send 🔮**. That's it.
                   "vs receptive/open your states can register.")
         )
 
-        # Session info
+        # Initialize engine (cache keyed on config values so switching
+        # backend/model/field-range in the sidebar rebuilds it)
+        @st.cache_resource
+        def init_engine(backend_name, host, port, model, or_key, or_model, fx, fy, fz):
+            # Override config from sidebar
+            config.backend = backend_name
+            config.ollama_host = host
+            config.ollama_port = port
+            config.ollama_model = model
+            config.openrouter_api_key = or_key
+            config.openrouter_model = or_model
+            config.field_x_range = fx
+            config.field_y_range = fy
+            config.field_z_range = fz
+            engine = LookingGlassEngine()
+            renderer = FieldRenderer()
+            return engine, renderer
+
+        try:
+            engine, renderer = init_engine(
+                backend, ollama_host, ollama_port, ollama_model,
+                openrouter_api_key, openrouter_model,
+                field_x, field_y, field_z,
+            )
+        except Exception as e:
+            st.error(f"Failed to initialize engine: {e}")
+            st.stop()
+
+        # User authentication
+        st.markdown("---")
+        st.subheader("Who Is Asking?")
+        st.caption("Each user has their own password, session history, patterns, "
+                   "and oracle voice.")
+        _users = _list_users()
+        auth_mode = st.radio(
+            "Account",
+            ["Log in", "New user"],
+            horizontal=True,
+            help="Pick an existing account to log in, or create a new one. "
+                 "Each account keeps its own private session history.",
+        )
+        if auth_mode == "Log in":
+            sel_user = st.selectbox(
+                "Choose your name",
+                _users if _users else ["(no accounts yet)"],
+                help="Choose the account you want to open. Enter your password below.",
+            )
+            sel_password = st.text_input("Password", type="password", key="login_pw",
+                                         help="Your password for this account.")
+            if st.button("Open my mirror", key="login_btn",
+                         help="Unlocks your private session history and oracle voice."):
+                if sel_user.startswith("(") or not sel_password:
+                    st.warning("Pick a name and enter your password.")
+                elif engine.authenticate_user(sel_user, sel_password):
+                    st.session_state["current_user"] = engine.current_user
+                    st.success(f"Welcome back, {engine.current_user}.")
+                else:
+                    st.error("Incorrect password or unknown user.")
+        else:
+            new_user = st.text_input("New name", key="new_user_name",
+                                     help="A name for your new account.")
+            new_password = st.text_input("New password", type="password",
+                                         key="new_user_pw",
+                                         help="A password to protect this account.")
+            if st.button("Create my mirror", key="create_btn",
+                         help="Creates the account and signs you in."):
+                if not new_user or not new_password:
+                    st.warning("Enter a name and a password.")
+                elif engine.create_user(new_user, new_password):
+                    st.session_state["current_user"] = engine.current_user
+                    st.success(f"Welcome, {engine.current_user}. Your mirror is yours.")
+                else:
+                    st.error("That name is taken. Pick another or log in.")
+        if "current_user" not in st.session_state:
+            st.session_state["current_user"] = "default"
+
         st.markdown("---")
         st.caption(f"Looking Glass Engine v{config.version}")
         st.caption("Everything runs locally — no data leaves your machine"
                    if backend == "ollama"
                    else "Using cloud OpenRouter backend — queries are sent to OpenRouter")
 
-    # Initialize engine (cache keyed on all config values so switching
-    # backend/model/field-range in the sidebar rebuilds the engine)
-    @st.cache_resource
-    def init_engine(backend_name, host, port, model, or_key, or_model, fx, fy, fz):
-        # Override config from sidebar
-        config.backend = backend_name
-        config.ollama_host = host
-        config.ollama_port = port
-        config.ollama_model = model
-        config.openrouter_api_key = or_key
-        config.openrouter_model = or_model
-        config.field_x_range = fx
-        config.field_y_range = fy
-        config.field_z_range = fz
-
-        engine = LookingGlassEngine()
-        renderer = FieldRenderer()
-        return engine, renderer
-
-    try:
-        engine, renderer = init_engine(
-            backend, ollama_host, ollama_port, ollama_model,
-            openrouter_api_key, openrouter_model,
-            field_x, field_y, field_z,
-        )
-    except Exception as e:
-        st.error(f"Failed to initialize engine: {e}")
-        st.stop()
-
     # Main content area
     col1, col2 = st.columns([1, 1])
 
     with col1:
         st.subheader("📝 Your Question")
+
+        # Aether cast banner (once the persona is known)
+        if engine.persona is not None:
+            cast = engine.persona
+            st.markdown(
+                f'<div class="aether-cast">🜚 The oracle answers today as '
+                f'<b>{cast.archetype_name}</b>'
+                f'<span class="aether-reveal" title="The aether lot-casted this '
+                f'voice from genuine chance (seed + time + your state as a bias). '
+                f'Honest: you can reveal exactly how it was drawn.">ⓘ</span></div>',
+                unsafe_allow_html=True,
+            )
+            with st.expander("Show how this voice was chosen"):
+                st.caption(cast.reveal_text)
+
         question = st.text_area(
             "Ask the field anything",
             height=100,
             placeholder="What is the nature of consciousness?\nWhy am I here?\nWhat does this moment mean?",
             help="Type your question and press Enter or click 'Send'. The engine reads your state from how you write.",
         )
+
+        # Optional state confirmation
+        with st.expander("Correct my reading of your state (optional)"):
+            st.caption("The oracle reads your state from your words, but you "
+                       "know yourself best. Correct any axis to anchor the "
+                       "response on what's really true for you.")
+            c_a = st.number_input("Arousal (calm ↔ activated)", -10.0, 10.0, 0.0, 1.0, key="c_a")
+            c_d = st.number_input("Depth (surface ↔ deep)", -10.0, 10.0, 0.0, 1.0, key="c_d")
+            c_o = st.number_input("Self-disclosure (guarded ↔ receptive)", -10.0, 10.0, 0.0, 1.0, key="c_o")
+            confirm_clicked = st.button("Use my corrections", key="confirm_state")
+        confirmed_state = None
+        if confirm_clicked:
+            confirmed_state = {"arousal": c_a, "depth": c_d, "openness": c_o}
 
         col_send, col_clear = st.columns([1, 4])
         with col_send:
@@ -475,11 +593,17 @@ type a question in the box, press **Send 🔮**. That's it.
         if send_clicked and question.strip():
             with st.spinner("The field is listening..."):
                 try:
-                    result = engine.query(question.strip())
+                    history = engine.get_history(6)
+                    result = engine.query(
+                        question.strip(),
+                        confirmed_state=confirmed_state,
+                        history=history,
+                    )
 
                     # Store in session state
                     st.session_state.last_result = result
                     st.session_state.last_question = question.strip()
+                    st.session_state.confirmed = confirmed_state is not None
 
                 except Exception as e:
                     st.error(f"Error: {e}")
@@ -524,12 +648,13 @@ type a question in the box, press **Send 🔮**. That's it.
                 )
             with col_o:
                 st.metric(
-                    "Openness", f"{state.openness:+.2f}",
+                    "Self-disclosure", f"{state.openness:+.2f}",
                     delta_color="normal" if state.openness > 0 else "inverse",
-                    help=("Openness (Z axis, -10 to +10): how closed/defensive vs "
-                          "receptive/open your state reads. Positive = open, "
-                          "negative = guarded. Derived from question framing "
-                          "(open-ended vs closed) in your question."),
+                    help=("Self-disclosure (Z axis, -10 to +10): how guarded/"
+                          "defensive vs receptive/open your state reads. "
+                          "Positive = open, negative = guarded. An estimated "
+                          "tendency from your question's framing — not a "
+                          "measure of your personality."),
                 )
 
             # Region badge
@@ -543,12 +668,15 @@ type a question in the box, press **Send 🔮**. That's it.
             )
 
             # Magnitude and confidence
+            confirmed_tag = " (confirmed by you)" if result.get("confirmed") else ""
             st.caption(
-                f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}",
+                f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}"
+                f"{confirmed_tag}",
                 help=("Magnitude = overall strength of your state reading (how far "
                       "your state sits from the field's neutral center). Confidence = "
-                      "how much text was available to base the reading on (0 to 1); "
-                      "longer questions give more confident readings."),
+                      "how much text was available to base the reading on (0 to 1). "
+                      "'Confirmed by you' means you corrected this reading, so it "
+                      "anchors the response."),
             )
 
             # Resonance bars
@@ -584,16 +712,27 @@ type a question in the box, press **Send 🔮**. That's it.
         # Show region and response
         col_resp, col_meta = st.columns([3, 1])
         with col_resp:
-            st.caption("The AI's reflection, generated from your question plus "
-                       "your analyzed consciousness state — not a generic answer.")
+            st.caption("The oracle's reflection — generated from your question "
+                       "plus your state, spoken in this session's manifested "
+                       "voice. Every reply ends with a takeaway to carry.")
             st.markdown(f'<div class="response-box">{response}</div>', unsafe_allow_html=True)
         with col_meta:
+            persona_name = (result.get("persona") or {}).get("archetype_name") if result.get("persona") else None
+            if persona_name:
+                st.markdown(
+                    f'<span class="region-badge region-transcendent" '
+                    f'title="The personality the aether cast for this session. '
+                    f'It stays the same for the whole session, then re-casts '
+                    f'next time.">🜚 {persona_name}</span>',
+                    unsafe_allow_html=True,
+                )
             st.markdown(
                 f'<span class="region-badge {css_class}" title="The archetypal '
                 f'field region your state is closest to. Backend and model below '
                 f'tell you which engine produced this response.">{region}</span>',
                 unsafe_allow_html=True,
             )
+            st.caption(f"User: {engine.current_user}")
             st.caption(f"Backend: {config.backend}",
                        help="Which engine produced the response — 'ollama' is your "
                             "local model, 'openrouter' is the cloud gateway.")
@@ -601,30 +740,35 @@ type a question in the box, press **Send 🔮**. That's it.
                 f"Model: {config.ollama_model if config.backend == 'ollama' else config.openrouter_model}",
                 help="The specific model name behind this response.",)
 
-    # Session history in expander
+    # Session history in expander (scoped to current user)
     with st.expander("📊 Session History"):
-        st.caption("Every question you've asked, with the state reading and "
-                   "region at the time. Grows over time so you can see how your "
-                   "consciousness shifts across sessions.")
+        st.caption(f"Every question {engine.current_user} has asked, with the "
+                   "state reading, region, and oracle voice at the time. Grows "
+                   "over time so you can see how your state shifts across sessions.")
         history = engine.get_history(10)
         if history:
             for s in history:
-                st.markdown(f"**{s.get('timestamp', '')[:19]}** — {s.get('question', '')[:80]}...")
+                persona_tag = f" · 🜚 {s.get('persona', '')}" if s.get("persona") else ""
+                st.markdown(f"**{s.get('timestamp', '')[:19]}** — {s.get('question', '')[:70]}...{persona_tag}")
                 st.caption(f"Region: {s.get('state_region', 'N/A')} | "
                           f"Arousal: {s.get('state_arousal', 0):+.1f} | "
                           f"Depth: {s.get('state_depth', 0):+.1f} | "
-                          f"Openness: {s.get('state_openness', 0):+.1f}")
+                          f"Self-disc: {s.get('state_openness', 0):+.1f}")
                 st.markdown("---")
         else:
-            st.info("No sessions yet. Ask a question to start tracking.")
+            st.info(f"No sessions yet for '{engine.current_user}'. "
+                    "Ask a question to start tracking.")
 
-    # Pattern analysis
+    # Pattern analysis (scoped to current user)
     with st.expander("🔍 Pattern Analysis"):
+        st.caption(f"Regions {engine.current_user} visits most often, drawn from "
+                   "every logged session. This is the oracle's long memory — the "
+                   "patterns it can name back to you over time.")
         regions = engine.get_pattern_regions()
         if regions:
             st.write("Frequently visited regions:")
             for r in regions:
-                st.markdown(f"- **{r.get('label', 'Unknown')}**: {r.get('visits', 0)} visits ({r.get('probability', 0):.0%})")
+                st.markdown(f"- **{r.get('label', 'Unknown')}**: {r.get('visits', 0)} visits")
         else:
             st.info("No pattern data yet. Keep asking questions to build your pattern.")
 

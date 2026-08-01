@@ -40,13 +40,25 @@ class SynchronicityTracker:
                 state_openness REAL,
                 state_magnitude REAL,
                 state_region TEXT,
+                user TEXT DEFAULT 'default',
                 backend TEXT,
                 model TEXT,
                 response TEXT,
                 response_length INTEGER,
-                user_feedback TEXT
+                user_feedback TEXT,
+                persona TEXT
             );
+            """
+        )
+        # Migrate existing DBs: add persona/user columns if missing.
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(sessions)")]
+        if "persona" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN persona TEXT")
+        if "user" not in cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN user TEXT DEFAULT 'default'")
 
+        self._conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS synchronicities (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER,
@@ -70,6 +82,13 @@ class SynchronicityTracker:
                 intensity REAL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
+
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             """
         )
         self._conn.commit()
@@ -86,15 +105,17 @@ class SynchronicityTracker:
         model: str,
         response: str,
         user_feedback: Optional[str] = None,
+        persona: Optional[str] = None,
+        user: str = "default",
     ) -> int:
         """Log a complete session and return the session ID."""
         cursor = self._conn.execute(
             """
             INSERT INTO sessions (
                 timestamp, question, state_arousal, state_depth,
-                state_openness, state_magnitude, state_region,
-                backend, model, response, response_length, user_feedback
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                state_openness, state_magnitude, state_region, user,
+                backend, model, response, response_length, user_feedback, persona
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 datetime.now().isoformat(),
@@ -104,11 +125,13 @@ class SynchronicityTracker:
                 state_openness,
                 state_magnitude,
                 state_region,
+                user,
                 backend,
                 model,
                 response,
                 len(response),
                 user_feedback,
+                persona,
             ),
         )
         self._conn.commit()
@@ -171,20 +194,77 @@ class SynchronicityTracker:
         )
         self._conn.commit()
 
-    def get_session_history(self, limit: int = 20) -> list[dict]:
-        """Return recent sessions."""
+    def get_session_history(self, limit: int = 20, user: str = "default") -> list[dict]:
+        """Return recent sessions (optionally scoped to one user)."""
         cursor = self._conn.execute(
             """
             SELECT id, timestamp, question, state_arousal, state_depth,
-                   state_openness, state_region, backend, model,
-                   response_length, user_feedback
+                   state_openness, state_region, user, backend, model,
+                   response_length, user_feedback, persona
             FROM sessions
+            WHERE user = ?
             ORDER BY id DESC
             LIMIT ?
             """,
-            (limit,),
+            (user, limit),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+    def get_users(self) -> list[str]:
+        """Return the distinct users who have accounts."""
+        cursor = self._conn.execute(
+            "SELECT DISTINCT username FROM users ORDER BY username COLLATE NOCASE"
+        )
+        return [row["username"] for row in cursor.fetchall()]
+
+    def create_user(self, username: str, password: str) -> bool:
+        """Create a user account with a password. Returns False if exists."""
+        username = (username or "").strip()
+        if not username or not password:
+            return False
+        exists = self._conn.execute(
+            "SELECT 1 FROM users WHERE username = ? COLLATE NOCASE", (username,)
+        ).fetchone()
+        if exists:
+            return False
+        salt, pwd_hash = self._hash_password(password)
+        self._conn.execute(
+            "INSERT INTO users (username, password_hash, salt, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            (username, pwd_hash, salt, datetime.now().isoformat()),
+        )
+        self._conn.commit()
+        return True
+
+    def authenticate_user(self, username: str, password: str) -> bool:
+        """Verify a username/password pair. Return True if valid."""
+        username = (username or "").strip()
+        row = self._conn.execute(
+            "SELECT password_hash, salt FROM users WHERE username = ? COLLATE NOCASE",
+            (username,),
+        ).fetchone()
+        if not row:
+            return False
+        return self._verify_password(password, row["salt"], row["password_hash"])
+
+    @staticmethod
+    def _hash_password(password: str) -> tuple[str, str]:
+        """PBKDF2-SHA256 hash with a random salt. Salt stored next to hash."""
+        import hashlib
+        import secrets
+        salt = secrets.token_hex(16)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt.encode(), 120_000
+        ).hex()
+        return salt, digest
+
+    @staticmethod
+    def _verify_password(password: str, salt: str, expected_hash: str) -> bool:
+        import hashlib
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt.encode(), 120_000
+        ).hex()
+        return digest == expected_hash
 
     def get_field_trajectory(self, session_id: int) -> list[dict]:
         """Return the field trajectory for a session."""
@@ -199,7 +279,7 @@ class SynchronicityTracker:
         )
         return [dict(row) for row in cursor.fetchall()]
 
-    def get_pattern_regions(self, min_visits: int = 3) -> list[dict]:
+    def get_pattern_regions(self, min_visits: int = 3, user: str = "default") -> list[dict]:
         """Return regions the user visits frequently (patterns)."""
         cursor = self._conn.execute(
             """
@@ -208,12 +288,12 @@ class SynchronicityTracker:
                    AVG(state_depth) as avg_depth,
                    AVG(state_openness) as avg_openness
             FROM sessions
-            WHERE state_region IS NOT NULL AND state_region != 'Unmapped'
+            WHERE user = ? AND state_region IS NOT NULL AND state_region != 'Unmapped'
             GROUP BY state_region
             HAVING visits >= ?
             ORDER BY visits DESC
             """,
-            (min_visits,),
+            (user, min_visits),
         )
         return [dict(row) for row in cursor.fetchall()]
 

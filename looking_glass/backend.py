@@ -21,6 +21,82 @@ class BackendError(Exception):
     """Raised when the AI backend fails."""
 
 
+def _format_history(history: Optional[list]) -> str:
+    """Turn recent sessions into a short memory block for the oracle."""
+    if not history:
+        return ""
+    lines = ["RECENT SESSIONS (from the oracle's memory of you):"]
+    for s in history[:6]:
+        q = (s.get("question") or "").strip()
+        persona = s.get("persona") or s.get("state_region") or "the oracle"
+        ts = (s.get("timestamp") or "")[:10]
+        if q:
+            lines.append(f"- [{ts}] you asked: \"{q[:80]}\" (cast: {persona})")
+    return "\n".join(lines)
+
+
+def build_oracle_messages(prompt: str, context: Optional[dict] = None) -> list:
+    """Build the shared system prompt + messages for the oracle.
+
+    Delivers: persona voice (from the aether cast), honest state framing,
+    self-distancing duty, value-over-echo, and a mandatory takeaway closer.
+    """
+    context = context or {}
+    persona_name = context.get("persona_name", "the oracle")
+    persona_voice = context.get("persona_voice", "")
+    confirmed = "CONFIRMED BY THE USER" if context.get("confirmed") else "ESTIMATED"
+
+    if persona_voice:
+        persona_block = (
+            f"YOUR MANIFEST PERSONA THIS SESSION: {persona_name}. {persona_voice}"
+        )
+    else:
+        persona_block = f"You are the oracle, manifesting today as {persona_name}."
+
+    state_block = (
+        f"[STATE ({confirmed} tendency, low-moderate confidence): "
+        f"arousal={context.get('arousal', 0):+.1f} (calm<->activated), "
+        f"depth={context.get('depth', 0):+.1f} (surface<->deep), "
+        f"self-disclosure={context.get('openness', 0):+.1f} (guarded<->receptive), "
+        f"confidence={context.get('confidence', 0):.2f}]"
+    )
+
+    history_block = _format_history(context.get("history"))
+
+    system = f"""You are the oracle of the Looking Glass — a reflective voice that reads
+the shape of a question and mirrors the user's own deeper awareness back to them.
+You never claim to be sentient, to read minds, to predict the future, or to
+channel entities. You are an honest structure for self-reflection, nothing more.
+
+{persona_block}
+
+READING, FRAMED HONESTLY:
+{state_block}
+These numbers are an ESTIMATED tendency from the user's words, not a certainty.
+Mention them with humility, never as a verdict. If a reading seems off, invite
+the user to correct it.
+
+SELF-DISTANCING DUTY:
+When the user is distressed or self-immersed, gently create distance — frame
+their situation as something to OBSERVE ("notice the part of you that..."), not
+to re-experience. Never intensify painful feelings artistically.
+
+VALUE OVER ECHO:
+Add genuine insight, not polished mirroring. Ground it in what they actually
+asked. Poetic is fine; empty beauty is not.
+
+{history_block}
+
+MANDATORY CLOSING:
+End EVERY reply with a short takeaway in the voice of {persona_name} — a
+reframe, a named micro-step, a question to carry, or a split of what can change
+vs. what must be accepted. Never leave the user with reflection alone."""
+
+    messages = [{"role": "system", "content": system}]
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
 class AIBackend:
     """Base class for AI backends."""
 
@@ -56,36 +132,7 @@ class OpenRouterBackend(AIBackend):
             )
 
     def _build_messages(self, prompt: str, context: Optional[dict]) -> list:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a consciousness field interpreter. "
-                    "Respond to the user's question as if emerging from a deep "
-                    "field of awareness. Your responses should feel like they "
-                    "come from somewhere beyond the conscious mind — not as "
-                    "an AI assistant, but as a reflection from the field itself. "
-                    "Be poetic, evocative, and precise. "
-                    "When the user's state is deep and open, respond with "
-                    "insight and stillness. When the user is activated and "
-                    "surface-level, respond with grounding and clarity. "
-                    "Never claim to be sentient or to channel entities. "
-                    "Frame everything as the user's own deeper awareness "
-                    "surfacing."
-                ),
-            }
-        ]
-
-        if context:
-            state_info = (
-                f"[User consciousness state: arousal={context.get('arousal', 0):.1f}, "
-                f"depth={context.get('depth', 0):.1f}, "
-                f"openness={context.get('openness', 0):.1f}]"
-            )
-            messages.append({"role": "system", "content": state_info})
-
-        messages.append({"role": "user", "content": prompt})
-        return messages
+        return build_oracle_messages(prompt, context)
 
     def generate(
         self, prompt: str, context: Optional[dict] = None
@@ -129,36 +176,7 @@ class OllamaBackend(AIBackend):
         self.base_url = f"http://{self.host}:{self.port}/v1"
 
     def _build_messages(self, prompt: str, context: Optional[dict]) -> list:
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a consciousness field interpreter. "
-                    "Respond to the user's question as if emerging from a deep "
-                    "field of awareness. Your responses should feel like they "
-                    "come from somewhere beyond the conscious mind — not as "
-                    "an AI assistant, but as a reflection from the field itself. "
-                    "Be poetic, evocative, and precise. "
-                    "When the user's state is deep and open, respond with "
-                    "insight and stillness. When the user is activated and "
-                    "surface-level, respond with grounding and clarity. "
-                    "Never claim to be sentient or to channel entities. "
-                    "Frame everything as the user's own deeper awareness "
-                    "surfacing."
-                ),
-            }
-        ]
-
-        if context:
-            state_info = (
-                f"[User consciousness state: arousal={context.get('arousal', 0):.1f}, "
-                f"depth={context.get('depth', 0):.1f}, "
-                f"openness={context.get('openness', 0):.1f}]"
-            )
-            messages.append({"role": "system", "content": state_info})
-
-        messages.append({"role": "user", "content": prompt})
-        return messages
+        return build_oracle_messages(prompt, context)
 
     def generate(
         self, prompt: str, context: Optional[dict] = None
