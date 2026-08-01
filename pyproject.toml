@@ -1,0 +1,39 @@
+[project]
+name = "looking-glass-engine"
+version = "0.1.0"
+description = "Software-only consciousness interface — a Looking Glass engine for terminal-based consciousness exploration"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31",
+    "rich>=13.0",
+    "numpy>=1.26",
+    "blessed>=1.20",
+    "sqlite-utils>=3.35",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+looking-glass = "looking_glass.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+]
+ollama = [
+    "ollama>=0.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["looking_glass"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
