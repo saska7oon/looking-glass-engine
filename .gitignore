@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Database / runtime data
+*.db
+*.sqlite3
+sessions.db
+~/.looking-glass/
+
+# Misc
+.DS_Store
+*.log

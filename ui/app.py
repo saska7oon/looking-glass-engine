@@ -188,7 +188,7 @@ def render_field_map_html(field, state: Optional[dict] = None, response: str = "
     svg_parts.append(f'<text x="{5}" y="{height/2 + 15}" fill="#666" font-size="10" text-anchor="middle" '
                     f'transform="rotate(-90, 5, {height/2 + 15})">-Y = Surface</text>')
 
-    # Region circles
+    # Region circles + labels
     region_colors = {
         "Surface Mind": "#95a5a6",
         "Deep Stillness": "#2c3e50",
@@ -198,8 +198,20 @@ def render_field_map_html(field, state: Optional[dict] = None, response: str = "
         "Shadow Depth": "#8e44ad",
         "Transcendent Peak": "#f39c12",
     }
-    for region in ConsciousnessField.REGIONS if 'ConsciousnessField' in dir() else []:
-        pass  # regions handled below
+    for r in ConsciousnessField.REGIONS:
+        rx, ry = to_screen(r.center.x, r.center.y)
+        color = region_colors.get(r.name, "#bdc3c7")
+        # Radius in screen units from field coords (approximate on X axis)
+        r_px = r.radius * x_scale
+        svg_parts.append(
+            f'<circle cx="{rx}" cy="{ry}" r="{r_px}" fill="{color}" '
+            f'fill-opacity="0.10" stroke="{color}" stroke-opacity="0.4" '
+            f'stroke-dasharray="4 2"/>'
+        )
+        svg_parts.append(
+            f'<text x="{rx}" y="{ry}" fill="{color}" font-size="9" '
+            f'text-anchor="middle" font-weight="bold">{r.name}</text>'
+        )
 
     # Plot field history as a trail
     if field and hasattr(field, 'history'):
@@ -296,24 +308,28 @@ def main():
         st.caption("Looking Glass Engine v0.1.0")
         st.caption("Everything runs locally — no data leaves your machine")
 
-    # Initialize engine
+    # Initialize engine (cache keyed on all config values so switching
+    # backend/model/field-range in the sidebar rebuilds the engine)
     @st.cache_resource
-    def init_engine():
+    def init_engine(backend_name, host, port, model, fx, fy, fz):
         # Override config from sidebar
-        config.backend = backend
-        config.ollama_host = ollama_host
-        config.ollama_port = ollama_port
-        config.ollama_model = ollama_model
-        config.field_x_range = field_x
-        config.field_y_range = field_y
-        config.field_z_range = field_z
+        config.backend = backend_name
+        config.ollama_host = host
+        config.ollama_port = port
+        config.ollama_model = model
+        config.field_x_range = fx
+        config.field_y_range = fy
+        config.field_z_range = fz
 
         engine = LookingGlassEngine()
         renderer = FieldRenderer()
         return engine, renderer
 
     try:
-        engine, renderer = init_engine()
+        engine, renderer = init_engine(
+            backend, ollama_host, ollama_port, ollama_model,
+            field_x, field_y, field_z,
+        )
     except Exception as e:
         st.error(f"Failed to initialize engine: {e}")
         st.stop()
@@ -358,25 +374,25 @@ def main():
             result = st.session_state.last_result
             field = engine.field
 
-            # Field map
-            field_html = render_field_map_html(field)
-            st.markdown(field_html, unsafe_allow_html=True)
-
             # State metrics
             state = result["state"]
             region = result["region"]
 
+            # Field map
+            field_html = render_field_map_html(field, state)
+            st.markdown(field_html, unsafe_allow_html=True)
+
             st.markdown("### State Reading")
             col_a, col_d, col_o = st.columns(3)
             with col_a:
-                st.metric("Arousal", f"{state['arousal']:+.2f}",
-                         delta_color="inverse" if state['arousal'] < 0 else "normal")
+                st.metric("Arousal", f"{state.arousal:+.2f}",
+                         delta_color="inverse" if state.arousal < 0 else "normal")
             with col_d:
-                st.metric("Depth", f"{state['depth']:+.2f}",
-                         delta_color="normal" if state['depth'] > 0 else "inverse")
+                st.metric("Depth", f"{state.depth:+.2f}",
+                         delta_color="normal" if state.depth > 0 else "inverse")
             with col_o:
-                st.metric("Openness", f"{state['openness']:+.2f}",
-                         delta_color="normal" if state['openness'] > 0 else "inverse")
+                st.metric("Openness", f"{state.openness:+.2f}",
+                         delta_color="normal" if state.openness > 0 else "inverse")
 
             # Region badge
             css_class = get_region_css_class(region)
@@ -384,7 +400,7 @@ def main():
                        unsafe_allow_html=True)
 
             # Magnitude and confidence
-            st.caption(f"Magnitude: {state.get('magnitude', 0):.2f}  |  Confidence: {state.get('confidence', 0):.2f}")
+            st.caption(f"Magnitude: {state.magnitude():.2f}  |  Confidence: {state.confidence:.2f}")
 
             # Resonance bars
             st.markdown("### Field Resonance")
