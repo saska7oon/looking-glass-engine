@@ -31,62 +31,56 @@ st.set_page_config(
 # Import field module for region definitions
 from looking_glass.field import ConsciousnessField
 
-# Custom CSS
+# Custom CSS — cohesive etheric dark theme (every custom element sets both
+# background and text color so nothing renders white-on-white)
 st.markdown("""
 <style>
+    :root {
+        --ether-bg: #0d0b1a;
+        --ether-panel: #16112e;
+        --ether-panel-2: #1d1740;
+        --ether-border: #3a2f6b;
+        --ether-text: #e8e2ff;
+        --ether-muted: #a99fd6;
+        --ether-purple: #8e44ad;
+        --ether-accent: #a78bfa;
+    }
+    .stApp {
+        background: var(--ether-bg);
+    }
     .main-header {
         text-align: center;
         padding: 1rem 0;
-        border-bottom: 2px solid #4a90d9;
+        border-bottom: 2px solid var(--ether-purple);
         margin-bottom: 2rem;
     }
     .main-header h1 {
-        color: #4a90d9;
+        color: var(--ether-accent);
         font-size: 2.5rem;
         margin: 0;
     }
     .main-header p {
-        color: #666;
+        color: var(--ether-muted);
         font-size: 1.1rem;
         margin: 0.5rem 0 0 0;
     }
-    .state-card {
-        background: #f0f4f8;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border-left: 4px solid #4a90d9;
-    }
-    .state-card h3 {
-        margin: 0 0 1rem 0;
-        color: #333;
-    }
-    .state-metric {
-        display: inline-block;
-        margin: 0.5rem 1rem 0.5rem 0;
-        padding: 0.5rem 1rem;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    .state-metric .label {
-        font-size: 0.8rem;
-        color: #888;
-        text-transform: uppercase;
-    }
-    .state-metric .value {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #4a90d9;
+    /* Chat area (question + response) on etheric panels */
+    [data-testid="stTextArea"] textarea,
+    [data-testid="stTextInput"] input {
+        background-color: var(--ether-panel) !important;
+        color: var(--ether-text) !important;
+        border: 1px solid var(--ether-border) !important;
     }
     .response-box {
-        background: #fafafa;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        border: 1px solid #e0e0e0;
+        background: var(--ether-panel);
+        color: var(--ether-text);
+        border: 1px solid var(--ether-border);
+        border-radius: 12px;
+        padding: 1.4rem 1.6rem;
+        margin: 0.75rem 0;
         line-height: 1.8;
     }
+    .response-box strong { color: var(--ether-accent); }
     .region-badge {
         display: inline-block;
         padding: 0.25rem 0.75rem;
@@ -106,20 +100,15 @@ st.markdown("""
     .resonance-bar {
         height: 8px;
         border-radius: 4px;
-        background: #ecf0f1;
+        background: #2a2450;
         margin: 0.25rem 0;
         overflow: hidden;
     }
     .resonance-fill {
         height: 100%;
         border-radius: 4px;
-        background: #4a90d9;
+        background: var(--ether-accent);
         transition: width 0.5s ease;
-    }
-    .command-hint {
-        color: #999;
-        font-size: 0.85rem;
-        font-style: italic;
     }
     .aether-cast {
         background: linear-gradient(135deg, #1a1a3a, #2c1a3a);
@@ -130,18 +119,19 @@ st.markdown("""
         margin: 0.5rem 0 1rem 0;
         font-size: 0.95rem;
     }
+    .aether-cast b { color: #f0e6ff; }
     .aether-reveal {
         margin-left: 0.5rem;
         cursor: help;
         opacity: 0.7;
     }
     .takeaway-box {
-        background: #f4f0ff;
+        background: #221a3d;
+        color: var(--ether-text);
         border-left: 4px solid #8e44ad;
         border-radius: 8px;
         padding: 0.8rem 1.1rem;
         margin: 0.5rem 0;
-        color: #4a3760;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -735,7 +725,8 @@ default host/model, type a question in the box, press **Send 🔮**. That's it.
                        "voice. Every reply ends with a takeaway to carry.")
             st.markdown(f'<div class="response-box">{response}</div>', unsafe_allow_html=True)
         with col_meta:
-            persona_name = (result.get("persona") or {}).get("archetype_name") if result.get("persona") else None
+            persona = result.get("persona")
+            persona_name = persona.archetype_name if persona else None
             if persona_name:
                 st.markdown(
                     f'<span class="region-badge region-transcendent" '
